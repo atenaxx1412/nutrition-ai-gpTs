@@ -1,0 +1,70 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // User profile images
+    match /users/{userId}/profile/{imageId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null; // Allow others to read profile images
+    }
+    
+    // Meal images - users can upload and access their own meal images
+    match /meals/{userId}/{mealId}/{imageId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Validate image upload
+      allow write: if request.auth != null && 
+        request.auth.uid == userId &&
+        request.resource.size < 10 * 1024 * 1024 && // Max 10MB
+        request.resource.contentType.matches('image/.*');
+    }
+    
+    // Family shared images
+    match /families/{familyId}/shared/{imageId} {
+      allow read, write: if request.auth != null; // Will be validated by Firestore rules
+      
+      // Validate image upload
+      allow write: if request.auth != null && 
+        request.resource.size < 10 * 1024 * 1024 && // Max 10MB
+        request.resource.contentType.matches('image/.*');
+    }
+    
+    // Progress images (body measurements, etc.)
+    match /progress/{userId}/{progressId}/{imageId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Validate image upload
+      allow write: if request.auth != null && 
+        request.auth.uid == userId &&
+        request.resource.size < 10 * 1024 * 1024 && // Max 10MB
+        request.resource.contentType.matches('image/.*');
+    }
+    
+    // Temporary uploads for analysis
+    match /temp/{userId}/{sessionId}/{imageId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Auto-delete after 24 hours (handled by Cloud Functions)
+      allow write: if request.auth != null && 
+        request.auth.uid == userId &&
+        request.resource.size < 10 * 1024 * 1024 && // Max 10MB
+        request.resource.contentType.matches('image/.*');
+      
+      // Allow deletion for cleanup
+      allow delete: if request.auth != null;
+    }
+    
+    // Admin access to all files
+    match /{allPaths=**} {
+      allow read, write: if request.auth != null && 
+        request.auth.token.admin == true;
+    }
+    
+    // Public readable files (app assets, etc.)
+    match /public/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null && 
+        request.auth.token.admin == true;
+    }
+  }
+}

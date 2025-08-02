@@ -1,0 +1,131 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Users collection - users can read/write their own data
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Allow service account (admin) access for API operations
+      allow read, write: if request.auth != null && request.auth.token.admin == true;
+    }
+    
+    // Meals collection - users can access their own meals
+    match /meals/{mealId} {
+      allow read, write: if request.auth != null && 
+        (request.auth.uid == resource.data.userId || 
+         request.auth.token.admin == true);
+      
+      // Allow creating meals if authenticated
+      allow create: if request.auth != null && 
+        request.auth.uid == request.resource.data.userId;
+    }
+    
+    // Goals collection - users can access their own goals
+    match /goals/{goalId} {
+      allow read, write: if request.auth != null && 
+        (request.auth.uid == resource.data.userId || 
+         request.auth.token.admin == true);
+      
+      // Allow creating goals if authenticated
+      allow create: if request.auth != null && 
+        request.auth.uid == request.resource.data.userId;
+    }
+    
+    // Progress collection - users can access their own progress
+    match /progress/{progressId} {
+      allow read, write: if request.auth != null && 
+        (request.auth.uid == resource.data.userId || 
+         request.auth.token.admin == true);
+      
+      // Allow creating progress if authenticated
+      allow create: if request.auth != null && 
+        request.auth.uid == request.resource.data.userId;
+    }
+    
+    // Families collection - members can access family data
+    match /families/{familyId} {
+      allow read, write: if request.auth != null && 
+        (request.auth.uid in resource.data.members.userId || 
+         request.auth.token.admin == true);
+      
+      // Allow creating families if authenticated
+      allow create: if request.auth != null;
+      
+      // Family members can read/write if they're part of the family
+      function isFamilyMember() {
+        return request.auth.uid in resource.data.members.userId;
+      }
+      
+      function isFamilyAdmin() {
+        return request.auth.uid == resource.data.adminUserId;
+      }
+      
+      allow update: if request.auth != null && 
+        (isFamilyMember() || isFamilyAdmin() || request.auth.token.admin == true);
+    }
+    
+    // Analysis collection - users can access their own analysis
+    match /analysis/{analysisId} {
+      allow read, write: if request.auth != null && 
+        (request.auth.uid == resource.data.userId || 
+         request.auth.token.admin == true);
+      
+      // Allow creating analysis if authenticated
+      allow create: if request.auth != null && 
+        request.auth.uid == request.resource.data.userId;
+    }
+    
+    // Global read access for authenticated users to public data
+    match /public/{document=**} {
+      allow read: if request.auth != null;
+    }
+    
+    // Admin-only collections
+    match /admin/{document=**} {
+      allow read, write: if request.auth != null && 
+        request.auth.token.admin == true;
+    }
+    
+    // Utility functions
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Validation functions
+    function isValidUserData() {
+      return request.resource.data.keys().hasAll(['name', 'age', 'gender', 'height', 'weight']) &&
+             request.resource.data.age is number &&
+             request.resource.data.age > 0 &&
+             request.resource.data.height is number &&
+             request.resource.data.height > 0 &&
+             request.resource.data.weight is number &&
+             request.resource.data.weight > 0;
+    }
+    
+    function isValidMealData() {
+      return request.resource.data.keys().hasAll(['userId', 'mealType', 'foodItems', 'timestamp']) &&
+             request.resource.data.mealType in ['breakfast', 'lunch', 'dinner', 'snack'] &&
+             request.resource.data.foodItems is list &&
+             request.resource.data.timestamp is timestamp;
+    }
+    
+    // Enhanced security for sensitive operations
+    match /users/{userId} {
+      allow update: if isOwner(userId) && isValidUserData();
+    }
+    
+    match /meals/{mealId} {
+      allow create: if isAuthenticated() && isValidMealData() && 
+        isOwner(request.resource.data.userId);
+    }
+  }
+}
