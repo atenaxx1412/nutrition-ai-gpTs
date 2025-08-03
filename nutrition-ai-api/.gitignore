@@ -33,6 +33,13 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# credentials and API keys
+/credentials/
+*.json
+!package*.json
+!tsconfig.json
+!vercel.json
+
 # vercel
 .vercel
 
