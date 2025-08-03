@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { UserService, MealService, GoalService } from '@/services/database';
+import { MealRecord } from '@/types/database';
 
 // Get user profile and recent data
 export async function GET(
   request: NextRequest,
-  { params }: { params: { userId: string } }
+  { params }: { params: Promise<{ userId: string }> }
 ) {
   try {
-    const { userId } = params;
+    const { userId } = await params;
 
     if (!userId) {
       return NextResponse.json(
@@ -63,10 +64,10 @@ export async function GET(
 // Update user profile
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { userId: string } }
+  { params }: { params: Promise<{ userId: string }> }
 ) {
   try {
-    const { userId } = params;
+    const { userId } = await params;
     const updates = await request.json();
 
     if (!userId) {
@@ -150,7 +151,7 @@ export async function POST(request: NextRequest) {
 }
 
 // Helper function to calculate average daily calories
-function calculateAverageDailyCalories(meals: any[]): number {
+function calculateAverageDailyCalories(meals: MealRecord[]): number {
   if (meals.length === 0) return 0;
 
   // Group meals by date
@@ -170,7 +171,7 @@ function calculateAverageDailyCalories(meals: any[]): number {
   return totalDays > 0 ? Math.round(totalCalories / totalDays) : 0;
 }
 
-export async function OPTIONS(request: NextRequest) {
+export async function OPTIONS() {
   return new NextResponse(null, {
     status: 200,
     headers: {

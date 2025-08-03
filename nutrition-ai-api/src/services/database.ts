@@ -19,7 +19,6 @@ import {
   NutritionGoal,
   ProgressRecord,
   Family,
-  NutritionAnalysis,
 } from '@/types/database';
 
 // Collections
@@ -33,7 +32,7 @@ const COLLECTIONS = {
 } as const;
 
 // Helper function to convert Firestore timestamps
-const convertTimestamps = (data: any) => {
+const convertTimestamps = (data: Record<string, unknown>) => {
   const converted = { ...data };
   Object.keys(converted).forEach(key => {
     if (converted[key] instanceof Timestamp) {
@@ -55,7 +54,7 @@ export class UserService {
       return { success: true, id: userRef.id };
     } catch (error) {
       console.error('Error creating user:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
 
@@ -82,7 +81,7 @@ export class UserService {
       return { success: true };
     } catch (error) {
       console.error('Error updating user:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
 }
@@ -95,7 +94,7 @@ export class MealService {
       return { success: true, id: mealRef.id };
     } catch (error) {
       console.error('Error creating meal:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
 
@@ -151,7 +150,7 @@ export class MealService {
       return { success: true };
     } catch (error) {
       console.error('Error updating meal:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
 
@@ -161,7 +160,7 @@ export class MealService {
       return { success: true };
     } catch (error) {
       console.error('Error deleting meal:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
 }
@@ -178,7 +177,7 @@ export class GoalService {
       return { success: true, id: goalRef.id };
     } catch (error) {
       console.error('Error creating goal:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
 
@@ -230,7 +229,7 @@ export class GoalService {
       return { success: true };
     } catch (error) {
       console.error('Error updating goal:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
 }
@@ -243,7 +242,7 @@ export class ProgressService {
       return { success: true, id: progressRef.id };
     } catch (error) {
       console.error('Error creating progress:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
 
@@ -278,7 +277,7 @@ export class FamilyService {
       return { success: true, id: familyRef.id };
     } catch (error) {
       console.error('Error creating family:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
 

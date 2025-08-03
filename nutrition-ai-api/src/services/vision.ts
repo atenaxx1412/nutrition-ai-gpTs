@@ -1,11 +1,50 @@
-import { ImageAnnotatorClient } from '@google-cloud/vision';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { DetectedFood, ImageAnalysisResult, NutritionInfo } from '@/types/database';
 
-// Initialize Google Vision API client
-const vision = new ImageAnnotatorClient({
-  projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
-  keyFilename: process.env.GOOGLE_CLOUD_KEY_FILE, // Path to service account key file
-});
+// Gemini API response types
+interface GeminiNutrition {
+  calories: number;
+  protein: number;
+  carbohydrates: number;
+  fat: number;
+  fiber: number;
+  sugar: number;
+  sodium: number;
+  cholesterol: number;
+}
+
+interface GeminiFood {
+  name: string;
+  estimated_weight: number;
+  nutrition: GeminiNutrition;
+  confidence: number;
+  category: string;
+}
+
+interface GeminiResponse {
+  detected_foods: GeminiFood[];
+  total_nutrition: GeminiNutrition;
+  analysis_notes: string;
+  overall_confidence: number;
+}
+
+// Google Vision API types
+interface VisionLabel {
+  description?: string;
+  score?: number;
+}
+
+interface VisionObject {
+  name?: string;
+  score?: number;
+  boundingPoly?: {
+    normalizedVertices: { x?: number; y?: number }[];
+  };
+}
+
+// Initialize Google Gemini API client
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
 // Nutrition database (simplified for MVP - in production, use proper nutrition API)
 const NUTRITION_DATABASE: Record<string, NutritionInfo> = {
@@ -75,79 +114,173 @@ const FOOD_CATEGORIES = {
 export class VisionService {
   static async analyzeImage(imageBuffer: Buffer): Promise<ImageAnalysisResult> {
     try {
-      // Perform label detection
-      const [labelResult] = await vision.labelDetection({
-        image: { content: imageBuffer },
-      });
+      console.log('🔍 Gemini API で食事分析開始...');
 
-      const labels = labelResult.labelAnnotations || [];
-      
-      // Extract food-related labels
-      const foodLabels = labels.filter(label => 
-        this.isFoodRelated(label.description?.toLowerCase() || '')
-      );
+      // Convert buffer to base64
+      const base64Image = imageBuffer.toString('base64');
+      const mimeType = this.detectMimeType(imageBuffer);
 
-      // Convert labels to detected foods
-      const detectedFoods = this.labelsToDetectedFoods(foodLabels);
+      // Optimized nutrition analysis prompt
+      const prompt = `
+あなたは栄養士として、この食事画像を詳細に分析してください。
 
-      // Calculate total nutrition
-      const totalNutrition = this.calculateTotalNutrition(detectedFoods);
+## 分析要求:
+1. 画像内の全ての食べ物・飲み物を識別
+2. 各食材の推定重量（グラム）
+3. 正確な栄養成分計算
+4. 調味料・ソース・油分も考慮
 
-      // Calculate overall confidence
-      const confidence = detectedFoods.length > 0 
-        ? detectedFoods.reduce((sum, food) => sum + food.confidence, 0) / detectedFoods.length
-        : 0;
+## 出力形式（必ずJSONで返答）:
+\`\`\`json
+{
+  "detected_foods": [
+    {
+      "name": "食材名（日本語）",
+      "estimated_weight": 数値（グラム）,
+      "nutrition": {
+        "calories": 数値,
+        "protein": 数値,
+        "carbohydrates": 数値,
+        "fat": 数値,
+        "fiber": 数値,
+        "sugar": 数値,
+        "sodium": 数値,
+        "cholesterol": 数値
+      },
+      "confidence": 0.0～1.0,
+      "category": "カテゴリ（protein/carbs/vegetables/etc）"
+    }
+  ],
+  "total_nutrition": {
+    "calories": 合計値,
+    "protein": 合計値,
+    "carbohydrates": 合計値,
+    "fat": 合計値,
+    "fiber": 合計値,
+    "sugar": 合計値,
+    "sodium": 合計値,
+    "cholesterol": 合計値
+  },
+  "analysis_notes": "栄養士としてのコメント・アドバイス",
+  "overall_confidence": 0.0～1.0
+}
+\`\`\`
 
-      return {
-        detectedFoods,
-        totalNutrition,
-        confidence,
-        analysisTime: new Date(),
-      };
+## 重要な注意点:
+- 見えない調味料・油分も推定に含める
+- 日本の標準的な食品成分表に基づく
+- 不明な場合は confidence を下げる
+- 必ずJSON形式で回答する
+`;
+
+      // Generate content with image
+      const result = await model.generateContent([
+        prompt,
+        {
+          inlineData: {
+            data: base64Image,
+            mimeType: mimeType,
+          },
+        },
+      ]);
+
+      const responseText = result.response.text();
+      console.log('📊 Gemini API レスポンス受信');
+
+      // Extract JSON from response
+      const analysisData = this.extractJsonFromResponse(responseText);
+
+      // Convert to our format
+      return this.convertGeminiResponse(analysisData);
+
     } catch (error) {
-      console.error('Error analyzing image:', error);
-      throw new Error('Failed to analyze image');
+      console.error('❌ Gemini API エラー:', error);
+      throw new Error(`Gemini API分析失敗: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
   static async analyzeImageWithObjectDetection(imageBuffer: Buffer): Promise<ImageAnalysisResult> {
+    // Gemini 2.5 Flash already includes advanced object detection
+    // No need for separate object detection method
+    return this.analyzeImage(imageBuffer);
+  }
+
+  // Helper method to detect MIME type from buffer
+  private static detectMimeType(buffer: Buffer): string {
+    const signatures = {
+      'image/jpeg': [0xFF, 0xD8, 0xFF],
+      'image/png': [0x89, 0x50, 0x4E, 0x47],
+      'image/webp': [0x52, 0x49, 0x46, 0x46],
+      'image/gif': [0x47, 0x49, 0x46],
+    };
+
+    for (const [mimeType, signature] of Object.entries(signatures)) {
+      if (signature.every((byte, index) => buffer[index] === byte)) {
+        return mimeType;
+      }
+    }
+    
+    return 'image/jpeg'; // Default fallback
+  }
+
+  // Extract JSON from Gemini response text
+  private static extractJsonFromResponse(responseText: string): GeminiResponse {
     try {
-      // Perform object localization for more precise detection
-      const [objectResult] = await vision.objectLocalization({
-        image: { content: imageBuffer },
-      });
-
-      const objects = objectResult.localizedObjectAnnotations || [];
-      
-      // Filter food objects
-      const foodObjects = objects.filter(obj => 
-        this.isFoodRelated(obj.name?.toLowerCase() || '')
-      );
-
-      // Convert objects to detected foods with bounding boxes
-      const detectedFoods = this.objectsToDetectedFoods(foodObjects);
-
-      // Fallback to label detection if no objects found
-      if (detectedFoods.length === 0) {
-        return this.analyzeImage(imageBuffer);
+      // Look for JSON block in markdown
+      const jsonMatch = responseText.match(/```json\s*(\{[\s\S]*?\})\s*```/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[1]);
       }
 
-      const totalNutrition = this.calculateTotalNutrition(detectedFoods);
-      const confidence = detectedFoods.length > 0 
-        ? detectedFoods.reduce((sum, food) => sum + food.confidence, 0) / detectedFoods.length
-        : 0;
+      // Try to parse the entire response as JSON
+      if (responseText.trim().startsWith('{')) {
+        return JSON.parse(responseText);
+      }
 
-      return {
-        detectedFoods,
-        totalNutrition,
-        confidence,
-        analysisTime: new Date(),
-      };
+      // Look for any JSON object in the text
+      const jsonObjectMatch = responseText.match(/\{[\s\S]*\}/);
+      if (jsonObjectMatch) {
+        return JSON.parse(jsonObjectMatch[0]);
+      }
+
+      throw new Error('No valid JSON found in response');
     } catch (error) {
-      console.error('Error analyzing image with object detection:', error);
-      // Fallback to basic label detection
-      return this.analyzeImage(imageBuffer);
+      console.error('JSON parsing error:', error);
+      console.error('Response text:', responseText);
+      throw new Error('Failed to parse Gemini response as JSON');
     }
+  }
+
+  // Convert Gemini response to our ImageAnalysisResult format
+  private static convertGeminiResponse(geminiData: GeminiResponse): ImageAnalysisResult {
+    const detectedFoods: DetectedFood[] = geminiData.detected_foods?.map((food: GeminiFood, index: number) => ({
+      id: `gemini_${Date.now()}_${index}`,
+      name: food.name || 'Unknown Food',
+      confidence: food.confidence || 0.8,
+      estimatedQuantity: food.estimated_weight || 100,
+      unit: 'g',
+      nutrition: {
+        calories: food.nutrition?.calories || 100,
+        protein: food.nutrition?.protein || 5,
+        carbohydrates: food.nutrition?.carbohydrates || 15,
+        fat: food.nutrition?.fat || 3,
+        fiber: food.nutrition?.fiber || 2,
+        sugar: food.nutrition?.sugar || 5,
+        sodium: food.nutrition?.sodium || 50,
+        cholesterol: food.nutrition?.cholesterol || 10,
+      },
+      category: food.category || 'unknown',
+    })) || [];
+
+    const totalNutrition: NutritionInfo = geminiData.total_nutrition || this.calculateTotalNutrition(detectedFoods);
+
+    return {
+      detectedFoods,
+      totalNutrition,
+      confidence: geminiData.overall_confidence || 0.8,
+      analysisTime: new Date(),
+      analysisNotes: geminiData.analysis_notes,
+    };
   }
 
   private static isFoodRelated(description: string): boolean {
@@ -162,27 +295,30 @@ export class VisionService {
            Object.values(FOOD_CATEGORIES).flat().some(food => description.includes(food));
   }
 
-  private static labelsToDetectedFoods(labels: any[]): DetectedFood[] {
+  private static labelsToDetectedFoods(labels: VisionLabel[]): DetectedFood[] {
     return labels.map(label => {
       const foodName = this.mapLabelToFood(label.description?.toLowerCase() || '');
       const nutrition = NUTRITION_DATABASE[foodName] || this.getDefaultNutrition();
       
       return {
+        id: `vision_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         name: foodName,
         confidence: label.score || 0,
         estimatedQuantity: 100, // Default 100g serving
         unit: 'g',
         nutrition,
+        category: 'detected',
       };
     }).filter(food => food.name !== 'unknown');
   }
 
-  private static objectsToDetectedFoods(objects: any[]): DetectedFood[] {
+  private static objectsToDetectedFoods(objects: VisionObject[]): DetectedFood[] {
     return objects.map(obj => {
       const foodName = this.mapLabelToFood(obj.name?.toLowerCase() || '');
       const nutrition = NUTRITION_DATABASE[foodName] || this.getDefaultNutrition();
       
       return {
+        id: `vision_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         name: foodName,
         confidence: obj.score || 0,
         boundingBox: obj.boundingPoly ? {
@@ -194,6 +330,7 @@ export class VisionService {
         estimatedQuantity: 100,
         unit: 'g',
         nutrition,
+        category: 'detected',
       };
     }).filter(food => food.name !== 'unknown');
   }
@@ -275,9 +412,14 @@ export class VisionService {
     });
 
     // Round to 1 decimal place
-    Object.keys(total).forEach(key => {
-      total[key as keyof NutritionInfo] = Math.round(total[key as keyof NutritionInfo] * 10) / 10;
-    });
+    total.calories = Math.round(total.calories * 10) / 10;
+    total.protein = Math.round(total.protein * 10) / 10;
+    total.carbohydrates = Math.round(total.carbohydrates * 10) / 10;
+    total.fat = Math.round(total.fat * 10) / 10;
+    total.fiber = Math.round(total.fiber * 10) / 10;
+    total.sugar = Math.round(total.sugar * 10) / 10;
+    total.sodium = Math.round(total.sodium * 10) / 10;
+    total.cholesterol = Math.round(total.cholesterol * 10) / 10;
 
     return total;
   }

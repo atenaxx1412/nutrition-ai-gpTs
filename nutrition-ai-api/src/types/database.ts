@@ -169,9 +169,11 @@ export interface ImageAnalysisResult {
   totalNutrition: NutritionInfo;
   confidence: number;
   analysisTime: Date;
+  analysisNotes?: string; // Gemini AI nutritionist advice
 }
 
 export interface DetectedFood {
+  id: string;
   name: string;
   confidence: number;
   boundingBox?: {
@@ -183,4 +185,5 @@ export interface DetectedFood {
   estimatedQuantity: number;
   unit: string;
   nutrition: NutritionInfo;
+  category: string;
 }

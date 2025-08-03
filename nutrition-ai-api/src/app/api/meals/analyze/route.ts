@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
     // Create meal record
     const mealRecord: Omit<MealRecord, 'id'> = {
       userId,
-      mealType: (mealType as any) || 'meal',
+      mealType: (mealType as 'breakfast' | 'lunch' | 'dinner' | 'snack') || 'snack',
       foodItems,
       totalNutrition: analysisResult.totalNutrition,
       notes,
@@ -232,7 +232,7 @@ function calculateTotalNutrition(foodItems: FoodItem[]) {
   return total;
 }
 
-export async function OPTIONS(request: NextRequest) {
+export async function OPTIONS() {
   return new NextResponse(null, {
     status: 200,
     headers: {
